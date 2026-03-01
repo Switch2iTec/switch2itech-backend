@@ -16,11 +16,46 @@ const app = express();
 // 3. Middlewares
 // ============================
 
-// ✅ CORS: Credentials must be true for HttpOnly cookies to work
+
+// ============================
+// 3. CORS & IP Whitelist Configuration
+// ============================
+
+// IP Whitelist - Add your allowed IPs here
+const IP_WHITELIST = [
+  "https://switch2itech.vercel.app",
+  "http://localhost:3000",
+  "http://localhost:5000",
+  // Add more IPs/domains as needed
+];
+
+// CORS Origin Checker Function
+const corsOriginChecker = (origin, callback) => {
+  // Allow requests with no origin (like mobile apps or curl requests)
+  if (!origin) {
+    return callback(null, true);
+  }
+
+  // Check if origin is in whitelist
+  if (IP_WHITELIST.includes(origin)) {
+    callback(null, true);
+  } else {
+    // Fallback: Allow all origins for now (comment out for production)
+    console.warn(`⚠️  CORS Request from unknown origin: ${origin}`);
+    callback(null, true); // Set to false to block unknown origins
+  }
+};
+
+// ✅ CORS Middleware with proper configuration
 app.use(
   cors({
+    origin: corsOriginChecker,
     credentials: true,
-    origin: process.env.CLIENT_URL || "https://switch2itech.vercel.app/",
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    exposedHeaders: ["Content-Length", "X-JSON-Response"],
+    maxAge: 86400, // 24 hours
+    optionsSuccessStatus: 200, // For legacy browser support
   })
 );
 
