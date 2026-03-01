@@ -4,8 +4,13 @@ const userController = require("../controllers/userController");
 const { protect } = require("../middleware/auth");
 const { restrictTo } = require("../middleware/restrictTo");
 
+const { upload } = require("../config/cloudinary");
+
 // All user routes require authentication
 router.use(protect);
+
+// Route for updating own profile
+router.put("/profile", upload.single("profile"), userController.updateProfile);
 
 // GET /api/users?role=developer   — Admin or Manager only
 // Returns all users, optionally filtered by ?role= query param
