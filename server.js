@@ -21,6 +21,8 @@ app.use(
   cors({
     credentials: true,
     origin: process.env.CLIENT_URL || "https://switch2itech.vercel.app"||"http://localhost:5173",
+    methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
   })
 );
 
