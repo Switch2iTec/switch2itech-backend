@@ -13,43 +13,14 @@ connectDB();
 const app = express();
 
 // ============================
-// 3. Middlewares
+// 3. CORS Configuration
 // ============================
-
-
-// ============================
-// 3. CORS & IP Whitelist Configuration
-// ============================
-
-// IP Whitelist - Add your allowed IPs here
-const IP_WHITELIST = [
-  "https://switch2itech.vercel.app",
-  "http://localhost:3000",
-  "http://localhost:5000",
-  // Add more IPs/domains as needed
-];
-
-// CORS Origin Checker Function
-const corsOriginChecker = (origin, callback) => {
-  // Allow requests with no origin (like mobile apps or curl requests)
-  if (!origin) {
-    return callback(null, true);
-  }
-
-  // Check if origin is in whitelist
-  if (IP_WHITELIST.includes(origin)) {
-    callback(null, true);
-  } else {
-    // Fallback: Allow all origins for now (comment out for production)
-    console.warn(`⚠️  CORS Request from unknown origin: ${origin}`);
-    callback(null, true); // Set to false to block unknown origins
-  }
-};
 
 // ✅ CORS Middleware with proper configuration
+// Temporarily allow all origins by reflecting the requesting origin
 app.use(
   cors({
-    origin: corsOriginChecker,
+    origin: true,
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
@@ -126,3 +97,5 @@ const server = app.listen(PORT, () => {
   console.log(` Server initialized on port ${PORT}`);
   console.log(` Mode: ${process.env.NODE_ENV || "development"}`);
 });
+
+module.exports = app;
