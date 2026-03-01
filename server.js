@@ -20,7 +20,7 @@ const app = express();
 app.use(
   cors({
     credentials: true,
-    origin: process.env.CLIENT_URL || "https://switch2itech.vercel.app",
+    origin: process.env.CLIENT_URL || "https://switch2itech.vercel.app"||"http://localhost:5173",
   })
 );
 
