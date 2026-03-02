@@ -18,15 +18,29 @@ const app = express();
 
 // ✅ CORS Middleware with proper configuration
 // Temporarily allow all origins by reflecting the requesting origin
+
+const allowedOrigins = [
+  "https://switch2itech.vercel.app",
+  "http://localhost:3000"
+];
+
 app.use(
   cors({
-    origin: true,
+    origin: function (origin, callback) {
+      if (!origin) return callback(null, true); // allow non-browser requests (Postman etc)
+
+      if (allowedOrigins.includes(origin)) {
+        callback(null, true);
+      } else {
+        callback(new Error("Not allowed by CORS"));
+      }
+    },
     credentials: true,
     methods: ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
     exposedHeaders: ["Content-Length", "X-JSON-Response"],
-    maxAge: 86400, // 24 hours
-    optionsSuccessStatus: 200, // For legacy browser support
+    maxAge: 86400,
+    optionsSuccessStatus: 200,
   })
 );
 
