@@ -1,16 +1,25 @@
 const User = require("../models/user");
+const { sendActivityNotification } = require("../services/notificationService");
 
 // @desc    Update user role
 // @route   PATCH /api/users/:id/role
 // @access  Private/Admin
 exports.updateUserRole = async (req, res) => {
     try {
-        const {role}=req.body;
-        const {id}=req.params;
-        const user=await User.findById(id).select("-password");;
-        user.role=role;
+        const { role } = req.body;
+        const { id } = req.params;
+        const user = await User.findById(id).select("-password");
+        user.role = role;
         await user.save();
-        res.json({status:"success",data:user,message:"Role updated successfully"})
+
+        // Notify user about role update
+        sendActivityNotification(
+            user,
+            "Account Role Updated",
+            `Your account role has been updated to "${role}". If you believe this is an error, please contact the administrator.`
+        );
+
+        res.json({ status: "success", data: user, message: "Role updated successfully" })
     } catch (err) {
         res.status(400).json({ status: "error", message: err.message });
     }
@@ -23,6 +32,15 @@ exports.getUsers = async (req, res) => {
     try {
         const users = await User.find().select("-password");
         res.status(200).json({ status: "success", data: users });
+    } catch (err) {
+        res.status(500).json({ status: "error", message: err.message });
+    }
+};
+exports.deleteUser = async (req, res) => {
+    try {
+        const user = await User.findById(req.params.id).select("-password");
+        await user.remove();
+        res.status(200).json({ status: "success", data: user });
     } catch (err) {
         res.status(500).json({ status: "error", message: err.message });
     }
@@ -54,7 +72,7 @@ exports.updateProfile = async (req, res) => {
         if (phoneNo) user.phoneNo = phoneNo;
         if (company) user.company = company;
         if (address) user.address = address;
-        
+
         if (skills) {
             try {
                 // Try parsing JSON first
@@ -69,7 +87,7 @@ exports.updateProfile = async (req, res) => {
                 user.skills = typeof skills === 'string' ? skills.split(',').map(s => s.trim()) : skills;
             }
         }
-        
+
         if (password) {
             user.password = password; // Hashed by pre-save hook
         }

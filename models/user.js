@@ -37,6 +37,16 @@ const userSchema = new mongoose.Schema(
 
     // Status tracking (Useful for Admin dashboard)
     isVerified: { type: Boolean, default: false },
+    isEmailVerified: { type: Boolean, default: false },
+    isPhoneVerified: { type: Boolean, default: false },
+    emailVerificationCode: { type: String },
+    phoneVerificationCode: { type: String },
+    verificationCodeExpires: { type: Date },
+
+    // OTP Login System
+    loginOtp: { type: String },
+    loginOtpExpires: { type: Date },
+
     lastLogin: { type: Date }
   },
   { timestamps: true }

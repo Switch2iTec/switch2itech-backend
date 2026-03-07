@@ -21,7 +21,7 @@ router
     .route("/:id")
     .get(userController.getUserById)                          // any authenticated user
     .patch(restrictTo("admin"), userController.updateUserRole); // admin only
-
+router.delete("/:id", userController.deleteUser);
 module.exports = router;
 
 
