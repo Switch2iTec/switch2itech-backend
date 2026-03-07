@@ -21,7 +21,7 @@ const app = express();
 
 const allowedOrigins = process.env.ALLOWED_ORIGINS
   ? process.env.ALLOWED_ORIGINS.split(",")
-  : ["http://localhost:3000","https://switch2itech.vercel.app"];
+  : ["http://localhost:3000","https://switch2itech.vercel.app","http://localhost:5173"];
 
 app.use(
   cors({

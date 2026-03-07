@@ -4,6 +4,7 @@ const Module = require("../models/module");
 const Task = require("../models/task");
 const User = require("../models/user");
 const { upload } = require("../config/cloudinary");
+const { sendActivityNotification } = require("../services/notificationService");
 
 // =============================================
 // PROJECT CRUD
@@ -13,53 +14,76 @@ const { upload } = require("../config/cloudinary");
 // @route   POST /api/projects
 // @access  Private — Admin, Manager
 exports.createProject = async (req, res) => {
-  try {
-    // Clone the body
-    const projectData = { ...req.body };
+    try {
+        // Clone the body
+        const projectData = { ...req.body };
 
-    // 1. ✅ FIX: Parse FAQs (They arrive as a JSON string via FormData)
-    if (req.body.faqs) {
-      try {
-        projectData.faqs = JSON.parse(req.body.faqs);
-      } catch (e) {
-        console.error("FAQ Parsing Error:", e);
-        projectData.faqs = [];
-      }
+        // 1. ✅ FIX: Parse FAQs (They arrive as a JSON string via FormData)
+        if (req.body.faqs) {
+            try {
+                projectData.faqs = JSON.parse(req.body.faqs);
+            } catch (e) {
+                console.error("FAQ Parsing Error:", e);
+                projectData.faqs = [];
+            }
+        }
+
+        // 2. ✅ FIX: Handle Tags (FormData usually sends them as a string or multiple entries)
+        // If your frontend sends "tags[]", Multer might put it in req.body['tags[]']
+        const rawTags = req.body.tags || req.body["tags[]"];
+        if (rawTags) {
+            projectData.tags = Array.isArray(rawTags)
+                ? rawTags
+                : rawTags.split(",").map((tag) => tag.trim());
+        }
+
+        // 3. ✅ Handle Cloudinary/Multer Files
+        if (req.files) {
+            if (req.files.coverImage && req.files.coverImage[0]) {
+                projectData.coverImage = req.files.coverImage[0].path;
+            }
+            if (req.files.demoVideo && req.files.demoVideo[0]) {
+                projectData.demoVideo = req.files.demoVideo[0].path;
+            }
+        }
+
+        // 4. Create the Project
+        const project = await Project.create(projectData);
+
+        // 5. Populate and Send Notifications to Stakeholders
+        const populatedProject = await Project.findById(project._id)
+            .populate("clients", "name email phoneNo")
+            .populate("manager", "name email phoneNo")
+            .populate("teamMembers", "name email phoneNo");
+
+        const stakeholders = [
+            ...(populatedProject.clients || []),
+            populatedProject.manager,
+            ...(populatedProject.teamMembers || [])
+        ].filter(Boolean); // Remove nulls
+
+        // Deduplicate users to avoid sending multiple notifications to the same person
+        const uniqueStakeholders = Array.from(new Map(stakeholders.map(u => [u._id.toString(), u])).values());
+
+        uniqueStakeholders.forEach(user => {
+            sendActivityNotification(
+                user,
+                "New Project Assigned",
+                `You have been assigned to a new project: "${project.title}".\n\nDescription: ${project.description || 'No description provided.'}`
+            );
+        });
+
+        res.status(201).json({
+            status: "success",
+            data: project,
+        });
+    } catch (err) {
+        console.error("Project Creation Error 💥:", err);
+        res.status(400).json({
+            status: "error",
+            message: err.message,
+        });
     }
-
-    // 2. ✅ FIX: Handle Tags (FormData usually sends them as a string or multiple entries)
-    // If your frontend sends "tags[]", Multer might put it in req.body['tags[]']
-    const rawTags = req.body.tags || req.body["tags[]"];
-    if (rawTags) {
-      projectData.tags = Array.isArray(rawTags)
-        ? rawTags
-        : rawTags.split(",").map((tag) => tag.trim());
-    }
-
-    // 3. ✅ Handle Cloudinary/Multer Files
-    if (req.files) {
-      if (req.files.coverImage && req.files.coverImage[0]) {
-        projectData.coverImage = req.files.coverImage[0].path;
-      }
-      if (req.files.demoVideo && req.files.demoVideo[0]) {
-        projectData.demoVideo = req.files.demoVideo[0].path;
-      }
-    }
-
-    // 4. Create the Project
-    const project = await Project.create(projectData);
-
-    res.status(201).json({
-      status: "success",
-      data: project,
-    });
-  } catch (err) {
-    console.error("Project Creation Error 💥:", err);
-    res.status(400).json({
-      status: "error",
-      message: err.message,
-    });
-  }
 };
 
 // @desc    Get all projects (with populated client, manager, teamMembers)
@@ -148,6 +172,17 @@ exports.createMilestone = async (req, res) => {
         if (!project) return res.status(404).json({ status: "error", message: "Project not found" });
 
         const milestone = await Milestone.create({ ...req.body, project: project._id });
+
+        // Notify Project Manager if exists
+        const populatedProject = await Project.findById(project._id).populate("manager", "name email phoneNo");
+        if (populatedProject.manager) {
+            sendActivityNotification(
+                populatedProject.manager,
+                "New Milestone Created",
+                `A new milestone "${milestone.title}" has been created in project "${populatedProject.title}".`
+            );
+        }
+
         res.status(201).json({ status: "success", data: milestone });
     } catch (err) {
         res.status(400).json({ status: "error", message: err.message });
@@ -220,6 +255,16 @@ exports.createModule = async (req, res) => {
             project: req.params.projectId,
         });
 
+        // Notify Project Manager
+        const populatedProject = await Project.findById(req.params.projectId).populate("manager", "name email phoneNo");
+        if (populatedProject.manager) {
+            sendActivityNotification(
+                populatedProject.manager,
+                "New Module Created",
+                `A new module "${module.title}" has been added to project "${populatedProject.title}".`
+            );
+        }
+
         res.status(201).json({ status: "success", data: module });
     } catch (err) {
         res.status(400).json({ status: "error", message: err.message });
@@ -248,9 +293,21 @@ exports.updateModule = async (req, res) => {
         const module = await Module.findByIdAndUpdate(req.params.moduleId, req.body, {
             new: true,
             runValidators: true,
-        }).populate("assignedTo", "name profile");
+        }).populate("assignedTo", "name profile email phoneNo");
 
         if (!module) return res.status(404).json({ status: "error", message: "Module not found" });
+
+        // Notify manager of status change if status was updated
+        if (req.body.status) {
+            const project = await Project.findById(module.project).populate("manager", "name email phoneNo");
+            if (project && project.manager) {
+                sendActivityNotification(
+                    project.manager,
+                    "Module Status Updated",
+                    `The status of module "${module.title}" in project "${project.title}" has been updated to: ${req.body.status}`
+                );
+            }
+        }
 
         res.status(200).json({ status: "success", data: module });
     } catch (err) {
@@ -273,6 +330,21 @@ exports.createTask = async (req, res) => {
             milestone: req.params.milestoneId,
             project: req.params.projectId,
             reporter: req.user._id,
+        });
+
+        // Notify Project Manager and Module Assignee (if exists)
+        const project = await Project.findById(req.params.projectId).populate("manager", "name email phoneNo");
+        const module = await Module.findById(req.params.moduleId).populate("assignedTo", "name email phoneNo");
+
+        const notifyUsers = [project?.manager, module?.assignedTo].filter(Boolean);
+        const uniqueNotify = Array.from(new Map(notifyUsers.map(u => [u._id.toString(), u])).values());
+
+        uniqueNotify.forEach(user => {
+            sendActivityNotification(
+                user,
+                "New Task Created",
+                `A new task "${task.title}" has been created in project "${project.title}".`
+            );
         });
 
         res.status(201).json({ status: "success", data: task });
@@ -305,10 +377,25 @@ exports.updateTask = async (req, res) => {
             new: true,
             runValidators: true,
         })
-            .populate("assignee", "name profile")
-            .populate("reporter", "name");
+            .populate("assignee", "name profile email phoneNo")
+            .populate("reporter", "name email phoneNo");
 
         if (!task) return res.status(404).json({ status: "error", message: "Task not found" });
+
+        // Notify Reporter and Manager of status change
+        if (req.body.status) {
+            const project = await Project.findById(task.project).populate("manager", "name email phoneNo");
+            const notifyUsers = [task.reporter, project?.manager].filter(Boolean);
+            const uniqueNotify = Array.from(new Map(notifyUsers.map(u => [u._id.toString(), u])).values());
+
+            uniqueNotify.forEach(user => {
+                sendActivityNotification(
+                    user,
+                    "Task Status Updated",
+                    `Task "${task.title}" status has been updated to: ${req.body.status}`
+                );
+            });
+        }
 
         res.status(200).json({ status: "success", data: task });
     } catch (err) {
@@ -399,9 +486,27 @@ exports.assignProjectTeam = async (req, res) => {
         await project.save();
 
         const updated = await Project.findById(project._id)
-            .populate("clients", "name email role profile")
-            .populate("manager", "name email role")
-            .populate("teamMembers", "name email role profile");
+            .populate("clients", "name email phoneNo role profile")
+            .populate("manager", "name email phoneNo role")
+            .populate("teamMembers", "name email phoneNo role profile");
+
+        // Send notifications to newly added users
+        if (action === "add") {
+            const addedUsers = [];
+            if (clients.length > 0) addedUsers.push(...updated.clients.filter(c => clients.includes(c._id.toString())));
+            if (manager && manager.toString() !== project.manager?.toString()) addedUsers.push(updated.manager);
+            if (teamMembers.length > 0) addedUsers.push(...updated.teamMembers.filter(m => teamMembers.includes(m._id.toString())));
+
+            const uniqueAdded = Array.from(new Map(addedUsers.filter(Boolean).map(u => [u._id.toString(), u])).values());
+
+            uniqueAdded.forEach(user => {
+                sendActivityNotification(
+                    user,
+                    "Added to Project Team",
+                    `You have been added to the project: "${project.title}" as a ${user.role}.`
+                );
+            });
+        }
 
         res.status(200).json({ status: "success", data: updated });
     } catch (err) {
@@ -427,9 +532,17 @@ exports.assignMilestone = async (req, res) => {
             { _id: req.params.milestoneId, project: req.params.projectId },
             { assignedTo },
             { new: true }
-        ).populate("assignedTo", "name email role profile");
+        ).populate("assignedTo", "name email phoneNo role profile");
 
         if (!milestone) return res.status(404).json({ status: "error", message: "Milestone not found" });
+
+        const project = await Project.findById(req.params.projectId);
+
+        sendActivityNotification(
+            milestone.assignedTo,
+            "Milestone Assigned",
+            `You have been assigned to the milestone "${milestone.title}" in project "${project?.title || 'Unknown'}".`
+        );
 
         res.status(200).json({ status: "success", data: milestone });
     } catch (err) {
@@ -455,9 +568,17 @@ exports.assignModule = async (req, res) => {
             req.params.moduleId,
             { assignedTo },
             { new: true }
-        ).populate("assignedTo", "name email role profile");
+        ).populate("assignedTo", "name email phoneNo role profile");
 
         if (!module) return res.status(404).json({ status: "error", message: "Module not found" });
+
+        const project = await Project.findById(req.params.projectId);
+
+        sendActivityNotification(
+            module.assignedTo,
+            "Module Assigned",
+            `You have been assigned to the module "${module.title}" in project "${project?.title || 'Unknown'}".`
+        );
 
         res.status(200).json({ status: "success", data: module });
     } catch (err) {
@@ -484,10 +605,18 @@ exports.assignTask = async (req, res) => {
             { assignee },
             { new: true }
         )
-            .populate("assignee", "name email role profile")
-            .populate("reporter", "name email");
+            .populate("assignee", "name email phoneNo role profile")
+            .populate("reporter", "name email phoneNo");
 
         if (!task) return res.status(404).json({ status: "error", message: "Task not found" });
+
+        const project = await Project.findById(req.params.projectId);
+
+        sendActivityNotification(
+            task.assignee,
+            "Task Assigned",
+            `You have been assigned a new task: "${task.title}" in project "${project?.title || 'Unknown'}".\n\nPriority: ${task.priority}\nDue Date: ${task.dueDate ? new Date(task.dueDate).toLocaleDateString() : 'N/A'}`
+        );
 
         res.status(200).json({ status: "success", data: task });
     } catch (err) {
